@@ -1,32 +1,256 @@
-# Prerequisites
-*.d
+const int sensorPins[] = {A0, A1, A2, A3, A4, A5, A6, A7}; // Pines analógicos a los que están conectados los sensores
+const int numSensores = 8; // Número de sensores
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+#define pwmi  3 //
+#define izq1  5
+#define izq2  4
+#define pwmd  11
+#define der1  7
+#define der2  6
 
-# Precompiled Headers
-*.gch
-*.pch
+//////////////// pid/////////////////////
+float KP=80;//constante proporcional 60
+float KD=0;//constante derivativa 50
+float KI=0;//constante integral
+int vel=255;//VELOCIDAD MÁXIMA DEL ROBOT MÁXIMA 255 vel de 300 es 180          OJO ESTE ES EL QUE SE AUMENTA O DISMINU
+int turbina=1800;//VELOCIDAD DE LA TURBINA MINIMA 1000 MÁXIMA2000
+int veladelante=160;//VELOCIDAD DEL FRENO DIRECCIÓN ADELANTE
+int velatras=60;//VELOCIDAD DEL FRENO DIRECCIÓN ATRÁS
+int veltest=1650;//VELOCIDAD DE TEST DE LA TURBINA
+float e=0;
+ float eAnt=0;
+ int vI=0;
+ int vD=0;
+ float pid;
+ int proporcional=0;
+int integral=0;
+int derivativo=0;
+int diferencial=0;
+int last_prop;
+int setpoint=3.5;
+////////////////////////////////////////
 
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
+int valoresMaximos[numSensores]; // Arreglo para almacenar los valores máximos de los sensores
+int valoresMinimos[numSensores]; // Arreglo para almacenar los valores mínimos de los sensores
+int valorMedio[numSensores];
+int sensorValores[numSensores];
+int Cal;
+int pos = 0;
+int Media; 
+int TotalPos;
+int TotalPosSig;
+int TotalPosAnt;
 
-# Fortran module files
-*.mod
-*.smod
+int ledS=9;
+int pulsador=0;                   //almacena el estado del botón
+int estado=0;                      //0=led apagado, 1=led encendido
 
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
+void setup() {
 
-# Executables
-*.exe
-*.out
-*.app
+  TCCR2B = TCCR2B & B11111000 | B00000010; 
+pinMode(8, INPUT);
+  pinMode(izq1,OUTPUT);
+  pinMode(izq2,OUTPUT);
+  pinMode(der1,OUTPUT);
+  pinMode(der2,OUTPUT);
+  pinMode(ledS,OUTPUT);
+
+
+ /* // Configurar pines de salida para motores
+  pinMode(9, OUTPUT); // Motor derecho
+  pinMode(10, OUTPUT); // Motor izquierdo
+ */ 
+  // Iniciar la comunicación serial
+  Serial.begin(9600);
+  digitalWrite(ledS , HIGH);
+  delay(2000);
+  // Inicializar valores máximos y mínimos
+  for (int i = 0; i < numSensores; i++) {
+    valoresMaximos[i] = 0;
+    valoresMinimos[i] = 1023; // Inicializar con un valor alto
+  }
+
+
+
+  for (int Cal = 0; Cal < 500;Cal++){
+    int sensorValores[numSensores]; // Almacena los valores leídos de los sensores
+
+  // Leer los valores de los sensores
+  for (int i = 0; i < numSensores; i++) {
+    sensorValores[i] = analogRead(sensorPins[i]);
+    
+    // Actualizar valores máximos y mínimos
+    if (sensorValores[i] > valoresMaximos[i]) {
+      valoresMaximos[i] = sensorValores[i];
+    }
+    if (sensorValores[i] < valoresMinimos[i]) {
+      valoresMinimos[i] = sensorValores[i];
+    }
+  }
+  // Realizar el seguimiento de línea y control de motores aquí
+  // ...
+
+  delay(10); // Esperar un corto período de tiempo antes de la siguiente lectura
+  }
+
+  // Mostrar los valores máximos y mínimos en el monitor serial
+  for (int i = 0; i < numSensores; i++) {
+    Serial.print("Sensor ");
+    Serial.print(i);
+    Serial.print(" - Máx: ");
+    Serial.print(valoresMaximos[i]);
+    Serial.print(" - Mín: ");
+    Serial.print(valoresMinimos[i]);
+  }
+
+  Serial.println("");
+for (int i = 0; i < numSensores; i++){
+  valorMedio[i] = (valoresMaximos[i] +valoresMinimos[i])/2;
+}
+
+digitalWrite(ledS , LOW);
+  delay(2000);
+digitalWrite(ledS , HIGH);
+  delay(1000);
+}
+void loop() {
+  pulsador = digitalRead(8); //lee si el botón está pulsado
+  
+   if(pulsador==LOW){         //si el boton es pulsado
+    estado=1-estado;
+    delay(500);
+  }
+
+  if(estado==1) {
+  LineBlack();
+  //LineWhite();
+   if (TotalPos==0){
+    motores(200,-90);
+   }else if (TotalPos==7){
+    motores(-90,200);
+   }else {
+    PID6();
+   }
+   }else{                                //si el estado es 0
+    motores(0,0);    //se apaga el led
+  }
+}
+
+
+void LineBlack(){
+  TotalPosAnt = TotalPos;
+  TotalPos = 0;
+  int suma = 0;
+  
+  for (int i = 0; i < numSensores; i++){
+    pos = analogRead(sensorPins[i]);
+    Media = valorMedio[i];
+    if (pos > Media){
+      pos = 1;
+      TotalPos = i;
+    } else {
+      pos = 0;
+    }
+    suma += pos;
+  }
+
+  if (suma == 8){
+    TotalPos = 4;
+  }
+
+  if (TotalPosAnt > 4 && TotalPos == 0) {
+    TotalPos = 7;
+  }
+
+  //Serial.print(suma);
+  Serial.println(TotalPos);
+}
+
+void LineWhite() {
+  TotalPosAnt = TotalPos;
+  TotalPos = 0;
+  int suma = 0;
+  int pos;    // Variable para almacenar el estado del sensor
+  int Media;  // Variable para almacenar el valor medio de cada sensor
+  
+  for (int i = 0; i < numSensores; i++) {
+    pos = analogRead(sensorPins[i]);  // Leer el valor del sensor
+    Media = valorMedio[i];            // Obtener el valor medio calibrado del sensor
+    
+    if (pos < Media) {
+      pos = 1;              // Sensor detecta línea (blanco o bajo valor)
+      TotalPos = i;         // Registrar la posición del sensor que detecta la línea
+    } else {
+      pos = 0;              // Sensor no detecta la línea
+    }
+    
+    suma += pos;            // Sumar el valor de todos los sensores
+  }
+  
+  // Si todos los sensores están apagados (todos detectan valores altos)
+  if (suma == 8) {
+    TotalPos = 4;  // Asignar posición al centro
+  }
+
+  // Si antes estaba en el lado derecho (TotalPosAnt > 4) y ahora está en el borde izquierdo
+  if (TotalPosAnt > 4 && TotalPos == 0) {
+    TotalPos = 7;  // Ajustar la posición para evitar cambios bruscos
+  }
+  
+  Serial.print("Posición: ");
+  Serial.println(TotalPos);  // Mostrar la posición actual de la línea
+}
+
+
+
+void motores (int izq,int der){
+  if(izq>=0){
+    digitalWrite(izq1,HIGH);
+    digitalWrite(izq2,LOW);
+  }else{
+    digitalWrite(izq1,LOW);
+    digitalWrite(izq2,HIGH);
+    izq=izq*(-1);
+  }
+  analogWrite(pwmi,izq);
+
+  if(der>=0){
+    digitalWrite(der1,HIGH);
+    digitalWrite(der2,LOW);
+  }else{
+    digitalWrite(der1,LOW);
+    digitalWrite(der2,HIGH);
+    der=der*(-1);
+  }
+  analogWrite(pwmd,der);
+}
+
+void PID6(){
+
+  e=TotalPos-setpoint;
+
+  pid= KP*e+ KD*(e-eAnt) + KI*(e+eAnt);
+  Serial.print("PID: ");
+  Serial.print(pid);
+
+  vI= vel - pid;
+  vD= vel + pid;
+
+  if (vI>vel){
+    vI=vel;
+  }
+  if (vD>vel){
+    vD=vel;
+  }
+
+    if (TotalPos<5 & TotalPos>2){
+    vI=250;//             ESTO ES LO QUE SE PUEDE AUMENTAR O DISMINUIR 
+    vD=250;
+  }
+  
+  motores(vI,vD);
+  eAnt = e;
+  
+  
+  
+}
